@@ -3,16 +3,22 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
+import os
 import time
 import uuid
+import yaml
 import jwt
+
+from dotenv import load_dotenv
 from jwt.exceptions import InvalidTokenError
+
+load_dotenv()
 
 app = FastAPI()
 
-# -----------------------------
-# Configuration
-# -----------------------------
+# =====================================================
+# CONFIGURATION
+# =====================================================
 
 EMAIL = "23f2000333@ds.study.iitm.ac.in"
 
@@ -34,24 +40,28 @@ dQIDAQAB
 -----END PUBLIC KEY-----
 """
 
-# -----------------------------
+# =====================================================
 # CORS
-# -----------------------------
+# =====================================================
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[ALLOWED_ORIGIN],
+    allow_origins=[
+        ALLOWED_ORIGIN,
+        "*"   # needed for Assignment 3 browser check
+    ],
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# -----------------------------
-# Middleware
-# -----------------------------
+# =====================================================
+# MIDDLEWARE
+# =====================================================
 
 @app.middleware("http")
 async def add_headers(request, call_next):
+
     start = time.perf_counter()
 
     response = await call_next(request)
@@ -63,53 +73,54 @@ async def add_headers(request, call_next):
 
     return response
 
-# -----------------------------
-# Models
-# -----------------------------
+# =====================================================
+# MODELS
+# =====================================================
 
 class TokenRequest(BaseModel):
     token: str
 
-# -----------------------------
-# Routes
-# -----------------------------
+# =====================================================
+# HOME
+# =====================================================
 
 @app.get("/")
 def home():
-    return {
-        "message": "Metrics API is running."
-    }
+    return {"message": "FastAPI Service Running"}
 
+# =====================================================
+# ASSIGNMENT 1
+# =====================================================
 
 @app.get("/stats")
 def stats(values: str = Query(...)):
+
     try:
-        numbers = [int(x.strip()) for x in values.split(",") if x.strip()]
+        nums = [int(x.strip()) for x in values.split(",") if x.strip()]
     except ValueError:
         return JSONResponse(
             status_code=400,
-            content={
-                "error": "values must contain integers only"
-            }
+            content={"error": "values must contain integers"},
         )
 
-    if not numbers:
+    if not nums:
         return JSONResponse(
             status_code=400,
-            content={
-                "error": "No values supplied"
-            }
+            content={"error": "No values supplied"},
         )
 
     return {
         "email": EMAIL,
-        "count": len(numbers),
-        "sum": sum(numbers),
-        "min": min(numbers),
-        "max": max(numbers),
-        "mean": sum(numbers) / len(numbers),
+        "count": len(nums),
+        "sum": sum(nums),
+        "min": min(nums),
+        "max": max(nums),
+        "mean": sum(nums) / len(nums),
     }
 
+# =====================================================
+# ASSIGNMENT 2
+# =====================================================
 
 @app.post("/verify")
 def verify(request: TokenRequest):
@@ -137,5 +148,89 @@ def verify(request: TokenRequest):
             status_code=401,
             content={
                 "valid": False
-            }
+            },
         )
+
+# =====================================================
+# ASSIGNMENT 3
+# =====================================================
+
+@app.get("/effective-config")
+def effective_config(set: list[str] | None = Query(default=None)):
+
+    config = {
+        "port": 8000,
+        "workers": 1,
+        "debug": False,
+        "log_level": "info",
+        "api_key": "default-secret-000",
+    }
+
+    # YAML
+
+    if os.path.exists("config.development.yaml"):
+
+        with open("config.development.yaml") as f:
+
+            yaml_cfg = yaml.safe_load(f) or {}
+
+        config.update(yaml_cfg)
+
+    # .env
+
+    if os.getenv("PORT"):
+        config["port"] = os.getenv("PORT")
+
+    if os.getenv("LOG_LEVEL"):
+        config["log_level"] = os.getenv("LOG_LEVEL")
+
+    if os.getenv("DEBUG"):
+        config["debug"] = os.getenv("DEBUG")
+
+    if os.getenv("API_KEY"):
+        config["api_key"] = os.getenv("API_KEY")
+
+    if os.getenv("NUM_WORKERS"):
+        config["workers"] = os.getenv("NUM_WORKERS")
+
+    # APP_ env vars
+
+    for k, v in os.environ.items():
+
+        if k.startswith("APP_"):
+
+            config[k[4:].lower()] = v
+
+    # CLI overrides
+
+    if set:
+
+        for item in set:
+
+            if "=" not in item:
+                continue
+
+            key, value = item.split("=", 1)
+
+            config[key] = value
+
+    # Type coercion
+
+    config["port"] = int(config["port"])
+
+    config["workers"] = int(config["workers"])
+
+    if isinstance(config["debug"], str):
+
+        config["debug"] = config["debug"].lower() in (
+            "true",
+            "1",
+            "yes",
+            "on",
+        )
+
+    # Mask secret
+
+    config["api_key"] = "****"
+
+    return config
