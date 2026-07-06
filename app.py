@@ -158,6 +158,9 @@ def verify(request: TokenRequest):
 @app.get("/effective-config")
 def effective_config(set: list[str] | None = Query(default=None)):
 
+    # -------------------------
+    # 1. Defaults
+    # -------------------------
     config = {
         "port": 8000,
         "workers": 1,
@@ -166,71 +169,58 @@ def effective_config(set: list[str] | None = Query(default=None)):
         "api_key": "default-secret-000",
     }
 
-    # YAML
-
+    # -------------------------
+    # 2. config.development.yaml
+    # -------------------------
     if os.path.exists("config.development.yaml"):
+        with open("config.development.yaml", "r") as f:
+            yaml_config = yaml.safe_load(f) or {}
+        config.update(yaml_config)
 
-        with open("config.development.yaml") as f:
-
-            yaml_cfg = yaml.safe_load(f) or {}
-
-        config.update(yaml_cfg)
-
-    # .env
-
-    if os.getenv("PORT"):
-        config["port"] = os.getenv("PORT")
-
-    if os.getenv("LOG_LEVEL"):
-        config["log_level"] = os.getenv("LOG_LEVEL")
-
-    if os.getenv("DEBUG"):
-        config["debug"] = os.getenv("DEBUG")
-
-    if os.getenv("API_KEY"):
-        config["api_key"] = os.getenv("API_KEY")
-
-    if os.getenv("NUM_WORKERS"):
+    # -------------------------
+    # 3. .env layer
+    #
+    # Assignment says .env is empty.
+    # Only support NUM_WORKERS alias if present.
+    # -------------------------
+    if os.getenv("NUM_WORKERS") is not None:
         config["workers"] = os.getenv("NUM_WORKERS")
 
-    # APP_ env vars
+    # -------------------------
+    # 4. APP_* OS environment
+    # -------------------------
+    for key, value in os.environ.items():
+        if key.startswith("APP_"):
+            config[key[4:].lower()] = value
 
-    for k, v in os.environ.items():
-
-        if k.startswith("APP_"):
-
-            config[k[4:].lower()] = v
-
-    # CLI overrides
-
+    # -------------------------
+    # 5. CLI overrides
+    # -------------------------
     if set:
-
         for item in set:
-
             if "=" not in item:
                 continue
 
             key, value = item.split("=", 1)
-
             config[key] = value
 
+    # -------------------------
     # Type coercion
-
+    # -------------------------
     config["port"] = int(config["port"])
-
     config["workers"] = int(config["workers"])
 
     if isinstance(config["debug"], str):
-
-        config["debug"] = config["debug"].lower() in (
+        config["debug"] = config["debug"].strip().lower() in (
             "true",
             "1",
             "yes",
             "on",
         )
 
-    # Mask secret
+    config["log_level"] = str(config["log_level"])
 
+    # Never expose the real secret
     config["api_key"] = "****"
 
     return config
