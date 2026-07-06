@@ -2,6 +2,8 @@ from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+from typing import List
+from fastapi import Header, HTTPException
 
 import os
 import time
@@ -21,6 +23,8 @@ app = FastAPI()
 # =====================================================
 
 EMAIL = "23f2000333@ds.study.iitm.ac.in"
+
+ANALYTICS_API_KEY = "ak_370f157fr363nhaitkk2kpea"
 
 ALLOWED_ORIGIN = "https://dash-sx1nc2.example.com"
 
@@ -80,6 +84,14 @@ async def add_headers(request, call_next):
 class TokenRequest(BaseModel):
     token: str
 
+class Event(BaseModel):
+    user: str
+    amount: float
+    ts: int
+
+
+class AnalyticsRequest(BaseModel):
+    events: List[Event]
 # =====================================================
 # HOME
 # =====================================================
@@ -224,3 +236,51 @@ def effective_config(set: list[str] | None = Query(default=None)):
     config["api_key"] = "****"
 
     return config
+
+
+# =====================================================
+# ASSIGNMENT 4
+# =====================================================
+
+@app.post("/analytics")
+def analytics(
+    request: AnalyticsRequest,
+    x_api_key: str = Header(default=None),
+):
+    if x_api_key != ANALYTICS_API_KEY:
+        raise HTTPException(
+            status_code=401,
+            detail="Unauthorized",
+        )
+
+    events = request.events
+
+    total_events = len(events)
+
+    unique_users = len({event.user for event in events})
+
+    revenue = 0.0
+
+    user_totals = {}
+
+    for event in events:
+        if event.amount > 0:
+            revenue += event.amount
+
+            user_totals[event.user] = (
+                user_totals.get(event.user, 0.0)
+                + event.amount
+            )
+
+    top_user = ""
+
+    if user_totals:
+        top_user = max(user_totals, key=user_totals.get)
+
+    return {
+        "email": EMAIL,
+        "total_events": total_events,
+        "unique_users": unique_users,
+        "revenue": revenue,
+        "top_user": top_user,
+    }
