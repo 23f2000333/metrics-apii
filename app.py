@@ -14,10 +14,31 @@ import jwt
 from dotenv import load_dotenv
 from jwt.exceptions import InvalidTokenError
 
+import time
+import uuid
+import logging
+from collections import deque
+
+from fastapi import Request
+from fastapi.responses import PlainTextResponse
+
+from prometheus_client import Counter, generate_latest, CONTENT_TYPE_LATEST
+
 load_dotenv()
 
 app = FastAPI()
+# =====================================================
+# OBSERVABILITY
+# =====================================================
 
+START_TIME = time.time()
+
+REQUEST_COUNTER = Counter(
+    "http_requests_total",
+    "Total HTTP requests"
+)
+
+LOGS = deque(maxlen=1000)
 # =====================================================
 # CONFIGURATION
 # =====================================================
@@ -64,7 +85,11 @@ app.add_middleware(
 # =====================================================
 
 @app.middleware("http")
-async def add_headers(request, call_next):
+async def observability_middleware(request: Request, call_next):
+
+    REQUEST_COUNTER.inc()
+
+    request_id = str(uuid.uuid4())
 
     start = time.perf_counter()
 
@@ -72,8 +97,17 @@ async def add_headers(request, call_next):
 
     elapsed = time.perf_counter() - start
 
-    response.headers["X-Request-ID"] = str(uuid.uuid4())
+    response.headers["X-Request-ID"] = request_id
     response.headers["X-Process-Time"] = f"{elapsed:.6f}"
+
+    LOGS.append(
+        {
+            "level": "INFO",
+            "ts": time.time(),
+            "path": request.url.path,
+            "request_id": request_id,
+        }
+    )
 
     return response
 
@@ -284,3 +318,38 @@ def analytics(
         "revenue": revenue,
         "top_user": top_user,
     }
+
+@app.get("/work")
+def work(n: int = 1):
+
+    # simulate work
+    for _ in range(max(0, n)):
+        pass
+
+    return {
+        "email": EMAIL,
+        "done": n,
+    }
+
+@app.get("/metrics")
+def metrics():
+
+    return PlainTextResponse(
+        generate_latest().decode(),
+        media_type=CONTENT_TYPE_LATEST,
+    )
+
+@app.get("/healthz")
+def healthz():
+
+    return {
+        "status": "ok",
+        "uptime_s": time.time() - START_TIME,
+    }
+
+@app.get("/logs/tail")
+def logs_tail(limit: int = 10):
+
+    limit = max(1, min(limit, 100))
+
+    return list(LOGS)[-limit:]
